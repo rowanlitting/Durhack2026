@@ -5,19 +5,21 @@ from textual.events import MouseUp, MouseDown, MouseMove
 from rich.style import Style
 from rich.segment import Segment
 
+#-------- general canvas widget --------
+
 class Canvas(Widget):
     def __init__(self):
         super().__init__()
-        self.pixels: dict[tuple[int, int], str] = {}
-        self.drawing = False
+        self.pixels: dict[tuple[int, int], str] = {} #empty dictionary storing point and its color
+        self.drawing = False #determines whether point mouse is at will be painted 
 
     def render_line(self, y: int) -> Strip:
-        width = self.size.width
-        segments = []
+        width = self.size.width #gets width of terminal
+        segments = [] #each line is pade up of segments of text, this is a list that contains the lines segment
         for x in range(width):
             color = self.pixels.get((x,y))
             style = Style(bgcolor=color) if color else Style()
-            segments.append(Segment(" ", style))
+            segments.append(Segment(" ", style)) #creates a segment based on what is contained within the pixels dict
         return Strip(segments)
 
     def on_mouse_down(self, event: MouseDown) -> None:
