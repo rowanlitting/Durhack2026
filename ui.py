@@ -15,6 +15,10 @@ class Drip:
     color: str
     remaining: int # how many more rows it can travel
 
+@dataclass
+class Point:
+    count: int
+    prev: tuple[int, int] | None
 
 SHADES = " ·░▒▓█"  # index = density level
 
@@ -25,14 +29,20 @@ class Canvas(Widget):
         super().__init__()
         # (x, y) -> (color, level)
         self.pixels: dict[tuple[int, int], tuple[str, int]] = {}
-        self.points: dict[tuple[int, int], int] = {}
+
+        self.points: dict[tuple[int, int], Point] = {}
+        self.last_point: tuple[int, int] | None = None
+        self.point_timer = None
+
         self.color = "red"
-        self.mouse_pos = (0, 0)
         self.spray_timer = None
         self.radius = 4        # spray size
         self.dots = 10         # dots per tick
+        
+        self.mouse_pos = (0, 0)
         self.last_pos = (0, 0)
         self.falloff = 2.5
+        
         self.drips: list[Drip] = []
         self.drip_chance = 0.3
         self.max_drips = 40
@@ -54,6 +64,9 @@ class Canvas(Widget):
     def on_mouse_down(self, event: MouseDown) -> None:
         self.capture_mouse()
         self.mouse_pos = self.last_pos = (event.x, event.y)
+
+        self.last_point = None
+
         self.spray_timer = self.set_interval(1 / 30, self.spray)
         self.point_timer = self.set_interval(1 / 2, self.point)
 
@@ -64,14 +77,18 @@ class Canvas(Widget):
         if self.spray_timer:
             self.spray_timer.stop()
             self.spray_timer = None
+        if self.point_timer:
+            self.point_timer.stop()
+            self.point_timer = None
         self.release_mouse()
 
     def point(self) -> None:
-        x, y = self.mouse_pos
-        if (x, y) in self.points:
-            self.points[x, y] += 1
+        pos = self.mouse_pos
+        if pos in self.points:
+            self.points[pos].count += 1
         else:
-            self.points[x, y] = 1
+            self.points[pos] = Point(count=1, prev=self.last_point)
+        self.last_point = pos
 
     def spray(self) -> None:
         x0, y0 = self.last_pos
