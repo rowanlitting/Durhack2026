@@ -21,6 +21,7 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 4, n_ite
     diffs = jnp.array(diffs_lst, dtype=jnp.complex64)
     rs = abs(diffs)
     us = diffs/rs
+    rs = jnp.minimum(rs, 15)
     inv_rs = 1/rs
 
     # Run the JIT-compiled, vectorized escape-time evaluation
