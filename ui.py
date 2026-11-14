@@ -28,7 +28,6 @@ class Canvas(Widget):
         self.paint(event.x, event.y)
 
     def on_mouse_move(self, event: MouseMove) -> None:
-        self.capture_mouse
         if self.drawing:
             self.paint(event.x, event.y)
 
