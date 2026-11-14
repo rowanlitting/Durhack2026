@@ -3,22 +3,31 @@ from rotation_iteration_for_disp import points_for_disp
 from canvas import Canvas, Point
 from fractal_view import FractalView
 import jax
+from textual.events import Key
 
 class DrawApp(App):
-    def compose(self) -> ComposeResult:
-        yield FractalView(id = "fractal")
-        #yield Canvas()
-    
-    
-    def on_mount(self) -> None:
-        rows, cols = self.size.height*2, self.size.width
-        p0 = (10,30)
-        p1 = (50, 20)
-        p2 = (10,30)
-        points =  {p0: Point(count=1, prev=None), p1: Point(count=1, prev=p0), p2: Point(count=1, prev=p1)}
-        last_point = p2
-        grid = points_for_disp(points, last_point, cols, rows, n_iters=100)
-        self.query_one(FractalView).set_grid(grid)
+    def compose(self):
+        yield Canvas()
+
+    async def on_key(self, event: Key) -> None:
+        if event.key == "r" and self.query(Canvas):
+            canvas = self.query_one(Canvas)
+            points = canvas.points
+            last_point = canvas.last_point
+            w, h = canvas.size.width, canvas.size.height
+
+            await canvas.remove()
+
+            fractal = FractalView()
+            await self.mount(fractal)
+            rows, cols = w, h*2
+            #p0 = (10,30)
+            #p1 = (50, 20)
+            #p2 = (10,30)
+            #points =  {p0: Point(count=1, prev=None), p1: Point(count=1, prev=p0), p2: Point(count=1, prev=p1)}
+            #last_point = p2
+            grid = points_for_disp(points, last_point, cols, rows, n_iters=100)
+            self.query_one(FractalView).set_grid(grid)
     
 
 if __name__ == "__main__":
