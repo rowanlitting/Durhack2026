@@ -10,7 +10,10 @@ from dataclasses import dataclass
 
 @dataclass
 class Drip:
-    pass
+    x: int
+    y: int
+    color: str
+    remaining: int # how many more rows it can travel
 
 
 SHADES = " ·░▒▓█"  # index = density level
@@ -30,6 +33,9 @@ class Canvas(Widget):
         self.dots = 10         # dots per tick
         self.last_pos = (0, 0)
         self.falloff = 2.5
+        self.drips: list[Drip] = []
+        self.drip_chance = 0.3
+        self.max_drips = 40
 
     def render_line(self, y: int) -> Strip:
         segments = []
@@ -41,6 +47,9 @@ class Canvas(Widget):
             else:
                 segments.append(Segment(" "))
         return Strip(segments)
+
+    def on_mount(self) -> None:
+        self.set_interval(1 / 10, self.update_drips)
 
     def on_mouse_down(self, event: MouseDown) -> None:
         self.capture_mouse()
@@ -89,7 +98,38 @@ class Canvas(Widget):
 
             if 0 <= x < self.size.width and 0 <= y < self.size.height:
                 _, level = self.pixels.get((x, y), (self.color, 0))
-                self.pixels[(x, y)] = (self.color, min(level + 1, len(SHADES) - 1))
+                new_level = min(level + 1, len(SHADES) - 1)
+                self.pixels[(x, y)] = (self.color, new_level)
+
+                # just became fully saturated: maybe start a drip
+                if (new_level == len(SHADES) - 1 and level < new_level
+                        and len(self.drips) < self.max_drips
+                        and random.random() < self.drip_chance):
+                    self.drips.append(Drip(x, y, self.color, random.randint(3, 12)))
+
+    def update_drips(self) -> None:
+        if not self.drips:
+            return
+
+        alive = []
+        for drip in self.drips:
+            # skipping some ticks gives each drip a different speed
+            if random.random() < 0.7:
+                drip.y += 1
+                drip.remaining -= 1
+                if drip.y >= self.size.height:
+                    continue   # ran off the bottom, discard it
+
+                # trail thins out as the drip runs dry
+                level = 3 if drip.remaining > 3 else max(1, drip.remaining)
+                _, old = self.pixels.get((drip.x, drip.y), (drip.color, 0))
+                self.pixels[(drip.x, drip.y)] = (drip.color, max(old, level))
+
+            if drip.remaining > 0:
+                alive.append(drip)
+
+        self.drips = alive
+        self.refresh()
 
 class DrawApp(App):
     def compose(self) -> ComposeResult:
