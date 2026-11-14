@@ -1,6 +1,6 @@
 import random
 import math
-from textual.app import App, ComposeResult
+
 from textual.widget import Widget
 from textual.strip import Strip
 from textual.events import MouseDown, MouseMove, MouseUp
@@ -148,10 +148,4 @@ class Canvas(Widget):
         self.drips = alive
         self.refresh()
 
-class DrawApp(App):
-    def compose(self) -> ComposeResult:
-        yield Canvas()
 
-
-if __name__ == "__main__":
-    DrawApp().run()
