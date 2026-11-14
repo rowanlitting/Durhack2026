@@ -276,6 +276,7 @@ def plot_julia_set(
     plt.show()
 
 
+
 if __name__ == "__main__":
     # Centers p_k, scale factors r_k, and arbitrary non-unit branch direction vectors
     ps = [-0.6 + 0.22j, -0.08 - 0.20j]
