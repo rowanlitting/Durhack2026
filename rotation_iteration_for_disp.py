@@ -3,10 +3,22 @@ import rotation_iterator as ri
 import jax
 import jax.numpy as jnp
 
-def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 5, n_iters = 300):
-    x = jnp.linspace(0, nx, nx)
-    y = jnp.linspace(0, ny, ny)
+
+def points_for_disp(points, last_point, nx, ny, escape_radius_squared=5,
+                    n_iters=300, y_scale=1.0, view=None):
+    if len(points) < 2:
+        return None  # need at least one segment
+
+    # view = (xmin, xmax, ymin, ymax) in canvas cell coordinates
+    if view is None:
+        view = (0, nx, 0, ny)
+    xmin, xmax, ymin, ymax = view
+
+    # nx, ny are pixel counts; sample pixel centres across the view
+    x = xmin + (jnp.arange(nx, dtype=jnp.float32) + 0.5) / nx * (xmax - xmin)
+    y = (ymin + (jnp.arange(ny, dtype=jnp.float32) + 0.5) / ny * (ymax - ymin)) * y_scale
     grid = x[None, :] + 1j * y[:, None]
+
 
     length = len(points) - 1
     ps_lst = []
@@ -14,24 +26,24 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 5, n_ite
     for i in range(length):
         x0, y0 = last_point
         x1, y1 = points[last_point].prev
-        ps_lst.append(x0 + 1j*y0)
-        diffs_lst.append((x1 - x0) + 1j*(y1-y0))
+        # y_scale stretches y so geometry isn't squashed on 1:2 terminal cells
+        ps_lst.append(x0 + 1j * (y0 * y_scale))
+        diffs_lst.append((x1 - x0) + 1j * ((y1 - y0) * y_scale))
         last_point = points[last_point].prev
     ps = jnp.array(ps_lst, dtype=jnp.complex64)
     diffs = jnp.array(diffs_lst, dtype=jnp.complex64)
-    rs = 1.2*abs(diffs)
-    us = diffs/rs
+    rs = 0.6 * abs(diffs)
+    us = diffs / rs
     rs = jnp.minimum(rs, 10)
-    inv_rs = 1/rs
+    inv_rs = 1 / rs
 
-    with open("./log.txt", "a") as fl:
-        fl.write(f"ps = {ps}; rs = {rs}; us = {us}; nx = {nx}; ny = {ny}")
-
-    # Run the JIT-compiled, vectorized escape-time evaluation
     inside, escape_steps = ri.evaluate_grid(
         grid, rs, inv_rs, ps, us, escape_radius_squared, n_iters
     )
-    return 100*(1-jnp.log(escape_steps)/jnp.log(n_iters)) #escape_steps
+
+    # Avoid log(0) (-> inf) and clip so the colour mapping stays in 0..100
+    steps = jnp.maximum(escape_steps, 1)
+    return jnp.clip(100 * (1 - jnp.log(steps) / jnp.log(n_iters)), 0, 100)
 
 if __name__ == "__main__":
     last_point = (6, 1)

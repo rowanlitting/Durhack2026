@@ -1,6 +1,5 @@
 import numpy as np
 import jax
-from PIL import Image as PILImage
 from rich.color import Color
 from rich.segment import Segment
 from rich.style import Style
@@ -10,28 +9,53 @@ from textual.strip import Strip
 from textual.widget import Widget
 
 # textual-image probes the terminal at import time, so import it at the top
-# level, before the app starts.
-from textual_image.widget import Image as AutoImage
-from textual_image.widget import HalfcellImage, UnicodeImage
+# level, before the app starts. If it's missing, fall back to half-blocks.
+try:
+    from PIL import Image as PILImage
+    from textual_image.widget import Image as AutoImage
+    from textual_image.widget import HalfcellImage, UnicodeImage
+
+    # True only if textual-image picked a real graphics protocol (kitty/sixel)
+    USE_GRAPHICS = AutoImage not in (HalfcellImage, UnicodeImage)
+except ImportError:
+    PILImage = None
+    AutoImage = None
+    USE_GRAPHICS = False
 
 MAX_ITER = 100
 
-# True if textual-image picked a real graphics protocol (kitty/sixel)
-USE_GRAPHICS = AutoImage not in (HalfcellImage, UnicodeImage)
-
 # Pixels per terminal cell when using graphics mode (cells are ~1:2, so 8x16)
-PX_PER_COL, PX_PER_ROW = 8, 16
+PX_PER_COL, PX_PER_ROW = 4, 8
+
+# Colour stops from far (dark) to near the set (bright)
+_STOPS = np.array([
+    [30, 28, 70],     # far away: dark indigo (no longer black)
+    [70, 55, 140],    # blue-violet
+    [150, 80, 170],   # orchid
+    [240, 120, 130],  # coral
+    [255, 215, 140],  # warm gold at the edge
+], dtype=np.float32)
+
+_INSIDE = np.array([255, 235, 190], dtype=np.float32)  # bounded points glow
 
 
 def colorize(grid: np.ndarray, max_iter: int) -> np.ndarray:
-    """Map iteration counts to an (H, W, 3) uint8 RGB array."""
-    t = grid / max_iter
-    r = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.00))
-    g = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.33))
-    b = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.67))
-    rgb = (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
-    rgb[grid >= max_iter] = 0  # never blew up -> black
-    return rgb
+    """Map the 0..100 field to an (H, W, 3) uint8 RGB array."""
+    g = np.asarray(grid, dtype=np.float32)
+    inside = g <= 0
+
+    # 1 = just escaped late (close to the set), 0 = escaped immediately
+    heat = 1.0 - np.clip(g / max_iter, 0, 1)
+    heat = heat ** 1.5            # higher power = tighter glow
+
+    # Piecewise-linear lookup through the colour stops
+    pos = heat * (len(_STOPS) - 1)
+    lo = np.floor(pos).astype(int).clip(0, len(_STOPS) - 2)
+    frac = (pos - lo)[..., None]
+    rgb = _STOPS[lo] * (1 - frac) + _STOPS[lo + 1] * frac
+
+    rgb[inside] = _INSIDE
+    return rgb.astype(np.uint8)
 
 
 class FractalView(Widget):

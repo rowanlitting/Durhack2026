@@ -1,4 +1,16 @@
 import numpy as np
+from textual.events import MouseDown, MouseScrollDown, MouseScrollUp
+from textual.worker import get_current_worker
+from textual import work
+
+from fractal_view import (
+    FractalView, AutoImage, PILImage, USE_GRAPHICS,
+    PX_PER_COL, PX_PER_ROW, MAX_ITER, colorize,
+)
+
+from rotation_iteration_for_disp import points_for_disp
+
+import numpy as np
 import sounddevice as sd
 from rich.text import Text
 from textual.containers import Vertical
@@ -251,7 +263,8 @@ class PianoScreen(ModalScreen):
 # ---------- Paint window ----------
 
 class PaintScreen(ModalScreen):
-    BINDINGS = [("escape", "close", "Close"), ("c", "clear", "Clear")]
+    BINDINGS = [("escape", "close", "Close"), ("c", "clear", "Clear"),
+                ("g", "generate", "Generate")]
 
     DEFAULT_CSS = """
     PaintScreen {
@@ -271,7 +284,26 @@ class PaintScreen(ModalScreen):
     def compose(self):
         with Vertical(id="window"):
             yield PaintCanvas()
-            yield Static("Drag to spray · C clear · Esc close", id="hint")
+            yield Static("Drag to spray · G generate · C clear · Esc close", id="hint")
+
+    def action_generate(self) -> None:
+        canvas = self.query_one(PaintCanvas)
+        if len(canvas.points) < 2:
+            self.notify("Draw a stroke first (hold for over half a second).")
+            return
+        self.notify("Generating…")
+        self.generate(dict(canvas.points), canvas.last_point,
+                      canvas.size.width, canvas.size.height)
+
+    def action_generate(self) -> None:
+        canvas = self.query_one(PaintCanvas)
+        if len(canvas.points) < 2:
+            self.notify("Draw a stroke first (hold for over half a second).")
+            return
+        self.app.push_screen(FractalScreen(
+            dict(canvas.points), canvas.last_point,
+            canvas.size.width, canvas.size.height,
+        ))
 
     def on_mount(self) -> None:
         self.query_one("#window").border_title = " Canvas "
@@ -281,3 +313,137 @@ class PaintScreen(ModalScreen):
 
     def action_clear(self) -> None:
         self.query_one(PaintCanvas).clear()
+
+# ----------- Fractal window -----------
+
+class FractalScreen(ModalScreen):
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("plus,equals_sign", "zoom(2)", "Zoom in"),
+        ("minus", "zoom(0.5)", "Zoom out"),
+        ("0,r", "reset", "Reset"),
+        ("left", "pan(-0.25, 0)", "Left"),
+        ("right", "pan(0.25, 0)", "Right"),
+        ("up", "pan(0, -0.25)", "Up"),
+        ("down", "pan(0, 0.25)", "Down"),
+    ]
+    MAX_ZOOM = 64
+
+    DEFAULT_CSS = """
+    FractalScreen {
+        align: center middle;
+        background: $background 40%;
+    }
+    FractalScreen #window {
+        width: auto;
+        height: auto;
+        border: round #8a8ab0;
+        background: $surface;
+    }
+    """
+
+    def __init__(self, points, last_point, cols: int, rows: int) -> None:
+        super().__init__()
+        self.points = points
+        self.last_point = last_point
+        self.cols = cols
+        self.rows = rows
+        self.full = (0.0, float(cols), 0.0, float(rows))
+        self.view = self.full
+
+    def compose(self):
+        with Vertical(id="window"):
+            view = AutoImage() if USE_GRAPHICS else FractalView(max_iter=MAX_ITER)
+            view.id = "fractal"
+            view.styles.width = self.cols
+            view.styles.height = self.rows
+            yield view
+
+    def on_mount(self) -> None:
+        self.query_one("#window").border_title = " Fractal "
+        self.render_view()
+
+    # ---------- zoom / pan ----------
+    @property
+    def zoom_level(self) -> float:
+        return self.cols / (self.view[1] - self.view[0])
+
+    def zoom_at(self, cx: float, cy: float, factor: float) -> None:
+        if factor > 1 and self.zoom_level * factor > self.MAX_ZOOM:
+            return
+        if factor < 1 and self.zoom_level * factor <= 1:
+            self.view = self.full
+        else:
+            x0, x1, y0, y1 = self.view
+            self.view = (cx - (cx - x0) / factor, cx + (x1 - cx) / factor,
+                         cy - (cy - y0) / factor, cy + (y1 - cy) / factor)
+        self.render_view()
+
+    def action_zoom(self, factor: float) -> None:
+        x0, x1, y0, y1 = self.view
+        self.zoom_at((x0 + x1) / 2, (y0 + y1) / 2, factor)
+
+    def action_pan(self, dx: float, dy: float) -> None:
+        x0, x1, y0, y1 = self.view
+        w, h = x1 - x0, y1 - y0
+        self.view = (x0 + dx * w, x1 + dx * w, y0 + dy * h, y1 + dy * h)
+        self.render_view()
+
+    def action_reset(self) -> None:
+        self.view = self.full
+        self.render_view()
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+    # ---------- mouse ----------
+    def _canvas_point(self, event):
+        """Mouse position -> canvas coordinates, or None if outside the image."""
+        off = event.get_content_offset(self.query_one("#fractal"))
+        if off is None:
+            return None
+        x0, x1, y0, y1 = self.view
+        return (x0 + (off.x + 0.5) / self.cols * (x1 - x0),
+                y0 + (off.y + 0.5) / self.rows * (y1 - y0))
+
+    def on_mouse_down(self, event: MouseDown) -> None:
+        p = self._canvas_point(event)
+        if p:
+            self.zoom_at(*p, 2 if event.button == 1 else 0.5)
+
+    def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
+        p = self._canvas_point(event)
+        if p:
+            self.zoom_at(*p, 1.5)
+
+    def on_mouse_scroll_down(self, event: MouseScrollDown) -> None:
+        p = self._canvas_point(event)
+        if p:
+            self.zoom_at(*p, 1 / 1.5)
+
+    # ---------- rendering ----------
+    def render_view(self) -> None:
+        self.query_one("#window").border_subtitle = " Computing… "
+        self.compute(self.view)
+
+    @work(thread=True, exclusive=True)
+    def compute(self, view) -> None:
+        pcol, prow = (PX_PER_COL, PX_PER_ROW) if USE_GRAPHICS else (1, 2)
+        grid = points_for_disp(
+            self.points, self.last_point,
+            self.cols * pcol, self.rows * prow,
+            y_scale=prow / pcol, view=view,
+        )
+        if get_current_worker().is_cancelled:
+            return  # a newer zoom superseded this one
+        self.app.call_from_thread(self.show, np.asarray(grid))
+
+    def show(self, grid) -> None:
+        if USE_GRAPHICS:
+            rgb = colorize(grid, MAX_ITER)
+            self.query_one("#fractal", AutoImage).image = PILImage.fromarray(rgb, "RGB")
+        else:
+            self.query_one("#fractal", FractalView).set_grid(grid)
+        self.query_one("#window").border_subtitle = (
+            f" {self.zoom_level:.1f}x · click zoom in · right-click/scroll out · arrows pan · R reset · Esc close "
+        )
