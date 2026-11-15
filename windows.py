@@ -132,7 +132,7 @@ class PianoScreen(ModalScreen):
     def __init__(self) -> None:
         super().__init__()
         self.pressed = set()
-        self.pattern = [None] * STEPS
+        self.pattern = [None] * STEPS # we can obtain this by calling pattern = self.app.get_screen("piano").pattern
         self.cursor_pos = 0
         self.bpm = 120
         self.playing = False
