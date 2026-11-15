@@ -34,6 +34,9 @@ def make_tone(freq, duration=0.6):
     envelope = np.exp(-4 * t)
     return (wave * envelope * 0.3).astype(np.float32)
 
+def pattern_to_semitones(pattern):
+    order = list(KEYS)
+    return [order.index(k) if k else None for k in pattern]
 
 TONES = {k: make_tone(f) for k, f in KEYS.items()}
 
@@ -300,9 +303,10 @@ class PaintScreen(ModalScreen):
         if len(canvas.points) < 2:
             self.notify("Draw a stroke first (hold for over half a second).")
             return
+        notes = pattern_to_semitones(self.app.get_screen("piano").pattern)
         self.app.push_screen(FractalScreen(
             dict(canvas.points), canvas.last_point,
-            canvas.size.width, canvas.size.height,
+            canvas.size.width, canvas.size.height, notes,
         ))
 
     def on_mount(self) -> None:
@@ -342,7 +346,7 @@ class FractalScreen(ModalScreen):
     }
     """
 
-    def __init__(self, points, last_point, cols: int, rows: int) -> None:
+    def __init__(self, points, last_point, cols: int, rows: int, notes=None) -> None:
         super().__init__()
         self.points = points
         self.last_point = last_point
@@ -350,6 +354,7 @@ class FractalScreen(ModalScreen):
         self.rows = rows
         self.full = (0.0, float(cols), 0.0, float(rows))
         self.view = self.full
+        self.notes = notes
 
     def compose(self):
         with Vertical(id="window"):
@@ -433,6 +438,7 @@ class FractalScreen(ModalScreen):
             self.points, self.last_point,
             self.cols * pcol, self.rows * prow,
             y_scale=prow / pcol, view=view,
+            notes=self.notes,
         )
         if get_current_worker().is_cancelled:
             return  # a newer zoom superseded this one
