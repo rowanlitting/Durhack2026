@@ -19,7 +19,7 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 5, n_ite
         last_point = points[last_point].prev
     ps = jnp.array(ps_lst, dtype=jnp.complex64)
     diffs = jnp.array(diffs_lst, dtype=jnp.complex64)
-    rs = 1.2*abs(diffs)
+    rs = 0.8*abs(diffs)
     us = diffs/rs
     rs = jnp.minimum(rs, 10)
     inv_rs = 1/rs
