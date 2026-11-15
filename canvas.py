@@ -7,6 +7,7 @@ from rich.style import Style
 from textual.events import MouseDown, MouseMove, MouseUp
 from textual.strip import Strip
 from textual.widget import Widget
+from textual.timer import Timer
 
 from functools import lru_cache
 from textual.events import Resize
@@ -300,20 +301,39 @@ class PaintCanvas(Canvas):
         self.spray_timer = None
         self.mouse_pos = (0, 0)
         self.last_pos = (0, 0)
+        self.points: list[tuple[int, int]] = []
+
+        #to get points use points = self.query_one(PaintCanvas).points from anywhere with access to the screen
+
+        self.sample_timer: Timer | None = None
+
+    def on_mouse_move(self, event: MouseMove) -> None:
+        self.mouse_pos = (event.x, event.y)
 
     def on_mouse_down(self, event: MouseDown) -> None:
         self.capture_mouse()
         self.mouse_pos = self.last_pos = (event.x, event.y)
-        self.spray_timer = self.set_interval(1 / 20, self.spray)
+        self.spray_timer = self.set_interval(1 / 30, self.spray)
 
-    def on_mouse_move(self, event: MouseMove) -> None:
-        self.mouse_pos = (event.x, event.y)
+        # Record the starting point, then one every half second
+        self.record_point()
+        self.sample_timer = self.set_interval(0.5, self.record_point)
 
     def on_mouse_up(self, event: MouseUp) -> None:
         if self.spray_timer:
             self.spray_timer.stop()
             self.spray_timer = None
+        if self.sample_timer:
+            self.sample_timer.stop()
+            self.sample_timer = None
         self.release_mouse()
+
+    def record_point(self) -> None:
+        self.points.append(self.mouse_pos)
+
+    def clear(self) -> None:
+        super().clear()
+        self.points.clear()
 
     def spray(self) -> None:
         x0, y0 = self.last_pos
