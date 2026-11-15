@@ -12,6 +12,7 @@ from title import HERE, load_variants, line_width
 
 from windows import PianoScreen, PaintScreen
 
+SUBTITLE_STYLE = Style(color="#c8c8e0", bold=True)
 
 class Letter:
     """One glitching letter: pre-rendered variants plus timing state (no widget)."""
@@ -64,11 +65,13 @@ class TitleSprayCanvas(AutoSprayCanvas):
 
     title_top = 5  # row where the letters rest
 
-    def __init__(self, text: str, **kwargs) -> None:
+    def __init__(self, text: str, subtitle: str, **kwargs) -> None:
         super().__init__(**kwargs)
         self.letters = [
             Letter(load_variants(HERE / f"{ch.lower()}_fonts.html")) for ch in text
         ]
+        self.subtitle = subtitle
+        self.title_height = max(l.height for l in self.letters)
 
     def on_mount(self) -> None:
         self.set_interval(1 / 30, self.tick_title)
@@ -110,6 +113,15 @@ class TitleSprayCanvas(AutoSprayCanvas):
                         segs[x] = Segment(ch, style)
             ox += letter.width
 
+        # 3. a line of text below the letters, non-space cells only
+        sub_y = self.title_top + self.title_height + 2
+        if self.subtitle and y == sub_y:
+            sx = (w - len(self.subtitle)) // 2
+            for i, ch in enumerate(self.subtitle):
+                x = sx + i
+                if ch != " " and 0 <= x < w:
+                    segs[x] = Segment(ch, SUBTITLE_STYLE)
+
         return Strip(segs)
 
 
@@ -139,7 +151,7 @@ class DrawApp(App):
     """
 
     def compose(self) -> ComposeResult:
-        yield TitleSprayCanvas("KOOS")
+        yield TitleSprayCanvas("KOOS", subtitle="designed to compose maths, art, and, music")
         yield Button("Piano", id="open-piano", classes="menu-btn")
         yield Button("Canvas", id="open-canvas", classes="menu-btn")
 
