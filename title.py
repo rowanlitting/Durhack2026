@@ -17,17 +17,14 @@ Segment = tuple[str, Style | None]
 # ---------- HTML parsing ----------
 
 def parse_style(css: str) -> Style | None:
-    fg = bg = None
+    fg = None
     for decl in css.split(";"):
         if ":" not in decl:
             continue
         key, val = (s.strip().lower() for s in decl.split(":", 1))
         if key == "color":
             fg = val
-        elif key == "background-color":
-            bg = val
-    return Style(color=fg, bgcolor=bg) if (fg or bg) else None
-
+    return Style(color=fg) if fg else None
 
 class PreParser(HTMLParser):
     """Turns the inside of one <pre> into lines of (text, style) segments."""
