@@ -1,48 +1,52 @@
 import numpy as np
-import jax.numpy as jnp
-from textual.widget import Widget
-from textual.strip import Strip
-from textual.reactive import reactive
+import jax
+from PIL import Image as PILImage
+from rich.color import Color
 from rich.segment import Segment
 from rich.style import Style
-from rich.color import Color
+from textual import events
+from textual.app import App, ComposeResult
+from textual.strip import Strip
+from textual.widget import Widget
+
+# textual-image probes the terminal at import time, so import it at the top
+# level, before the app starts.
+from textual_image.widget import Image as AutoImage
+from textual_image.widget import HalfcellImage, UnicodeImage
+
+MAX_ITER = 100
+
+# True if textual-image picked a real graphics protocol (kitty/sixel)
+USE_GRAPHICS = AutoImage not in (HalfcellImage, UnicodeImage)
+
+# Pixels per terminal cell when using graphics mode (cells are ~1:2, so 8x16)
+PX_PER_COL, PX_PER_ROW = 8, 16
+
+
+def colorize(grid: np.ndarray, max_iter: int) -> np.ndarray:
+    """Map iteration counts to an (H, W, 3) uint8 RGB array."""
+    t = grid / max_iter
+    r = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.00))
+    g = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.33))
+    b = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.67))
+    rgb = (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
+    rgb[grid >= max_iter] = 0  # never blew up -> black
+    return rgb
 
 
 class FractalView(Widget):
-    """Renders a 2D array of escape-iteration counts using half-blocks.
-
-    Each terminal cell shows two vertical pixels: the top one as the
-    foreground of '▀' and the bottom one as the background.
-    """
+    """Fallback renderer: two vertical pixels per cell using '▀'."""
 
     def __init__(self, max_iter: int = 100, **kwargs) -> None:
         super().__init__(**kwargs)
         self.max_iter = max_iter
-        self._rgb = np.zeros((0, 0, 3), dtype=np.uint8)  # (pixel_h, pixel_w, 3)
+        self._rgb = np.zeros((0, 0, 3), dtype=np.uint8)
 
-    # ---- data -> colour ------------------------------------------------
-    def _colorize(self, grid: np.ndarray) -> np.ndarray:
-        """Map iteration counts to an (H, W, 3) uint8 RGB array."""
-        t = grid / self.max_iter  # 0..1
-        # Smooth cosine palette; tweak the phase offsets to change the look
-        r = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.00))
-        g = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.33))
-        b = 0.5 + 0.5 * np.cos(2 * np.pi * (3.0 * t + 0.67))
-        rgb = (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
-        # Points that never blew up (hit max_iter) are in the set -> black
-        rgb[grid >= self.max_iter] = 0
-        return rgb
-
-    def set_grid(self, grid: jnp.ndarray) -> None:
-        """Pass in a (H, W) JAX array of iteration counts."""
-        grid_np = np.asarray(grid)  # one device->host transfer
-        self._rgb = self._colorize(grid_np)
+    def set_grid(self, grid) -> None:
+        self._rgb = colorize(np.asarray(grid), self.max_iter)
         self.refresh()
 
-    # ---- rendering -----------------------------------------------------
     def render_line(self, y: int) -> Strip:
-        width = self.size.width
-        top_row, bot_row = 2 * y, 2 * y + 1
         h, w, _ = self._rgb.shape
 
         def pixel(row: int, col: int) -> Color:
@@ -51,8 +55,39 @@ class FractalView(Widget):
                 return Color.from_rgb(int(r), int(g), int(b))
             return Color.from_rgb(0, 0, 0)
 
-        segments = [
-            Segment("▀", Style(color=pixel(top_row, x), bgcolor=pixel(bot_row, x)))
-            for x in range(width)
-        ]
-        return Strip(segments)
+        return Strip([
+            Segment("▀", Style(color=pixel(2 * y, x), bgcolor=pixel(2 * y + 1, x)))
+            for x in range(self.size.width)
+        ])
+
+
+class FractalApp(App):
+    CSS = """
+    AutoImage, FractalView { width: 100%; height: 100%; }
+    """
+
+    def compose(self) -> ComposeResult:
+        if USE_GRAPHICS:
+            yield AutoImage(id="fractal")
+        else:
+            yield FractalView(max_iter=MAX_ITER, id="fractal")
+
+    def on_resize(self, event: events.Resize) -> None:
+        rows, cols = event.size.height, event.size.width
+        key = jax.random.PRNGKey(0)
+
+        if USE_GRAPHICS:
+            view = self.query_one("#fractal", AutoImage)
+            grid = jax.random.randint(
+                key, (rows * PX_PER_ROW, cols * PX_PER_COL), 0, 101
+            )
+            rgb = colorize(np.asarray(grid), MAX_ITER)
+            view.image = PILImage.fromarray(rgb, "RGB")
+        else:
+            view = self.query_one("#fractal", FractalView)
+            grid = jax.random.randint(key, (2 * rows, cols), 0, 101)
+            view.set_grid(grid)
+
+
+if __name__ == "__main__":
+    FractalApp().run()
