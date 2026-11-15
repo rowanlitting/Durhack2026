@@ -346,9 +346,8 @@ class PaintCanvas(Canvas):
         if pos in self.points:
             self.points[pos].count += 1
         else:
-            point = Point(count=1, prev=self.last_point)
-            self.points[pos] = point
-            self.last_point = point
+            self.points[pos] = Point(count=1, prev=self.last_point)
+            self.last_point = pos
 
     def clear(self) -> None:
         super().clear()
