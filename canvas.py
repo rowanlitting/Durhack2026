@@ -26,7 +26,8 @@ class Drip:
     remaining: int  # how many more rows it can travel
 
 
-class Point:
+class Point: # This class is used in another test script, so we
+    #will keep it even if it has no other use!
     def __init__(self, count=1, prev=None):
         self.count = count
         self.prev = prev
