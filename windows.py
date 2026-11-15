@@ -150,8 +150,11 @@ class PianoScreen(ModalScreen):
     def on_mount(self) -> None:
         self.query_one("#window").border_title = " Piano "
 
-    def on_unmount(self) -> None:
+    def on_screen_suspend(self) -> None:
+        self.stop_playback()
         sd.stop()
+        self.pressed.clear()
+        self.refresh_piano()
 
     # --- helpers ---
     def status_text(self):

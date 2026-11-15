@@ -143,17 +143,21 @@ class DrawApp(App):
         yield Button("Piano", id="open-piano", classes="menu-btn")
         yield Button("Canvas", id="open-canvas", classes="menu-btn")
 
+    def on_mount(self) -> None:
+        self.install_screen(PianoScreen(), name="piano")
+        self.install_screen(PaintScreen(), name="paint")
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "open-piano":
-            self.open_window(PianoScreen())
+            self.open_window("piano")
         elif event.button.id == "open-canvas":
-            self.open_window(PaintScreen())
+            self.open_window("paint")
 
-    def open_window(self, screen) -> None:
+    def open_window(self, name: str) -> None:
         canvas = self.query_one(TitleSprayCanvas)
         canvas.paused = True
         # The callback runs when the window calls self.dismiss()
-        self.push_screen(screen, lambda _: setattr(canvas, "paused", False))
+        self.push_screen(name, lambda _: setattr(canvas, "paused", False))
 
 if __name__ == "__main__":
     DrawApp().run()
