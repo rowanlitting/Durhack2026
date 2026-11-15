@@ -151,7 +151,7 @@ class DrawApp(App):
     """
 
     def compose(self) -> ComposeResult:
-        yield TitleSprayCanvas("KOOS", subtitle="designed to compose maths, art, and, music")
+        yield TitleSprayCanvas("KOOS", subtitle="designed to compose maths, art, and music")
         yield Button("Piano", id="open-piano", classes="menu-btn")
         yield Button("Canvas", id="open-canvas", classes="menu-btn")
 
