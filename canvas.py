@@ -22,7 +22,9 @@ class Point:
 
 SHADES = " ·░▒▓█"  # index = density level
 
+
 #-------- general canvas widget --------
+
 
 class Canvas(Widget):
     def __init__(self) -> None:
@@ -72,7 +74,7 @@ class Canvas(Widget):
 
     def on_mouse_move(self, event: MouseMove) -> None:
         self.mouse_pos = (event.x, event.y)
-
+        
     def on_mouse_up(self, event: MouseUp) -> None:
         if self.spray_timer:
             self.spray_timer.stop()

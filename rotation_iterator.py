@@ -63,61 +63,86 @@ def evaluate_point(
       2. Align zero-angle ray v_k to +Re axis:  u_aligned = u * conj(v_k)
       3. Apply doubling map in aligned frame:   u_aligned_sq = u_aligned^2
       4. Rotate back to local u-coordinates:    u_next = v_k * u_aligned_sq
-      5. Map back to global z-coordinates:      z_next = r_k * u_next + p_k
+      5. Check if the resulting point will be within k's escape radius
+         (|u_next|^2 <= escape_radius_squared). If so, apply z = r_k * u_next + p_k;
+         otherwise leave z unchanged and move to the next function.
+
+    If a full cycle completes without any function acting on `z`, the point has escaped.
 
     Returns:
       (inside, final_step):
-        - inside: True if |u|^2 never exceeded `escape_radius_squared` over all steps.
-        - final_step: Total sub-steps completed before escaping (or n_iters * len(ps)).
+        - inside: True if at least one function acted in every cycle up to `n_iters`.
+        - final_step: Total number of function applications completed before escaping
+                      (or n_iters * len(ps) if every function acts in every cycle).
     """
     n_steps = rs.shape[0]
-    total_steps = n_iters * n_steps
 
     # Ensure carry dtype matches the promoted complex type across all inputs
-    z_dtype = jnp.result_type(z, rs, ps, unit_vecs)
+    z_dtype = jnp.result_type(z, rs, inv_rs, ps, unit_vecs)
     z_init = jnp.asarray(z, dtype=z_dtype)
 
+    def apply_all_points(
+        z_start: jax.Array,
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        def step_fn(
+            idx: int, carry: tuple[jax.Array, jax.Array, jax.Array]
+        ) -> tuple[jax.Array, jax.Array, jax.Array]:
+            z_curr, any_acted, acted_count = carry
+
+            r = rs[idx]
+            inv_r = inv_rs[idx]
+            p = ps[idx]
+            v = unit_vecs[idx]  # Pre-normalized unit vector w_idx / |w_idx|
+
+            # 1. Transform z into local u-coordinates centered at p and scaled by r
+            u = (z_curr - p) * inv_r
+
+            # 2. Rotate u so the branch direction v sits at angle 0 (+real axis)
+            u_aligned = u * jnp.conj(v)
+
+            # 3. Square in the aligned frame (doubles the angle measured from v)
+            u_aligned_sq = u_aligned * u_aligned
+
+            # 4. Rotate back to the unaligned local u-frame (|v| = 1 preserves magnitude)
+            u_next = v * u_aligned_sq
+
+            # 5. Act only if the mapped point will be within this function's escape radius
+            u_next_mag_sq = u_next.real * u_next.real + u_next.imag * u_next.imag
+            can_act = u_next_mag_sq <= escape_radius_squared
+
+            z_cand = r * u_next + p
+            z_updated = jnp.where(can_act, z_cand, z_curr)
+            any_acted = jnp.logical_or(any_acted, can_act)
+            acted_count = acted_count + jnp.where(can_act, jnp.int32(1), jnp.int32(0))
+
+            return (z_updated, any_acted, acted_count)
+
+        return jax.lax.fori_loop(
+            0, n_steps, step_fn, (z_start, jnp.bool_(False), jnp.int32(0))
+        )
+
     def cond_fn(state):
-        # Continue looping only while under the step budget and still inside escape radius
-        step, _, inside = state
-        return (step < total_steps) & inside
+        iter_idx, _, inside, _ = state
+        return (iter_idx < n_iters) & inside
 
     def body_fn(state):
-        step, z_curr, _ = state
+        iter_idx, z_curr, _, total_steps = state
 
-        # Select parameters for the current step in the composed cycle
-        idx = step % n_steps
-        r = rs[idx]
-        inv_r = inv_rs[idx]
-        p = ps[idx]
-        v = unit_vecs[idx]  # Pre-normalized unit vector w_idx / |w_idx|
+        # Apply the sequence of maps across `ps`, skipping functions whose
+        # image would fall outside their local escape radius
+        z_next, any_acted, acted_in_cycle = apply_all_points(z_curr)
 
-        # 1. Transform z into local u-coordinates centered at p and scaled by r
-        u = (z_curr - p) * inv_r
-
-        # 2. Rotate u so the branch direction v sits at angle 0 (+real axis)
-        u_aligned = u * jnp.conj(v)
-
-        # 3. Square in the aligned frame (doubles the angle measured from v)
-        u_aligned_sq = u_aligned * u_aligned
-
-        # 4. Rotate back to the unaligned local u-frame (|v| = 1 preserves magnitude)
-        u_next = v * u_aligned_sq
-
-        # 5. Transform back to global z-coordinates
-        z_next = r * u_next + p
-
-        # Escape test on |u_next|^2 == |u_aligned_sq|^2 (avoids sqrt from jnp.abs)
-        mag_sq = (
-            u_aligned_sq.real * u_aligned_sq.real
-            + u_aligned_sq.imag * u_aligned_sq.imag
+        return (
+            iter_idx + 1,
+            z_next,
+            any_acted,
+            total_steps + acted_in_cycle,
         )
-        still_inside = mag_sq <= escape_radius_squared
 
-        return (step + 1, z_next, still_inside)
-
-    final_step, _, inside = jax.lax.while_loop(
-        cond_fn, body_fn, (jnp.int32(0), z_init, jnp.bool_(True))
+    _, _, inside, final_step = jax.lax.while_loop(
+        cond_fn,
+        body_fn,
+        (jnp.int32(0), z_init, jnp.bool_(True), jnp.int32(0)),
     )
     return inside, final_step
 
@@ -168,6 +193,13 @@ def plot_julia_set(
     inside, escape_steps = evaluate_grid(
         grid, rs_arr, inv_rs_arr, ps_arr, unit_vecs, escape_radius_squared, n_iters
     )
+
+
+
+    escape_steps = jnp.maximum(escape_steps,2)
+
+
+
     inside_np = np.asarray(inside)
     steps_np = np.asarray(escape_steps, dtype=np.float32)
 
@@ -276,23 +308,62 @@ def plot_julia_set(
     plt.show()
 
 
+
 if __name__ == "__main__":
     # Centers p_k, scale factors r_k, and arbitrary non-unit branch direction vectors
-    ps = [-0.6 + 0.22j, -0.08 - 0.20j]
-    rs = [1.0, 0.8]
+    #ps = [-0.6 + 0.22j, -0.08 - 0.20j]
+    #rs = [1.0, 0.8]
+
+    """ps = [63.+23.j, 49.+22.j, 33.+21.j, 25.+16.j, 26.+12.j]
+    rs = [30.842802,  30.237465,  40.320778,   14.9477267,  7.2993155]
+    us = [-0.8312156 -0.05937254j, -0.8317104 -0.0519819j,  -0.7066652 -0.44166577j, 0.20211302-0.80845207j, -0.13699915-0.8219949j]
+    nx = 120
+    ny = 60"""
+
+
+
+    ps = jnp.array([
+    127.+32.j, 121.+33.j, 110.+33.j, 102.+33.j, 89.+33.j, 86.+33.j, 74.+32.j,
+     69.+32.j,  58.+31.j,  57.+31.j,  50.+32.j, 42.+32.j, 32.+32.j, 20.+30.j,
+     18.+27.j,  17.+22.j,  17.+16.j,  16.+11.j, 16.+8.j,
+    ])
+    key = jax.random.key(0)
+    ps = jax.random.permutation(key, ps)
+
+    rs = jnp.array([
+        7.2993155, 10.,        9.6,       10.,        14.6000001, 10.,
+        12,        10.,        12,       8.485282,  9.6,       10.,
+    10.,        4.3266616,  6.1188235, 7.2000003, 6.1188235, 12.000001,
+        14.8,
+    ])
+    rs = rs*0.7
+
+    us = [
+        -0.8219949+0.13699915j,  -0.8333333+0.j,          -0.8333333+0.j,
+        -0.8333333+0.j,          -0.8333333+0.j,          -0.83045477-0.06920456j,
+        -0.8333333+0.j,          -0.829911-0.07544645j,   -0.8333333+0.j,
+        -0.82495785+0.11785112j, -0.8333333+0.j,          -0.8333333+0.j,
+        -0.8219949-0.13699915j,  -0.46225014-0.69337523j, -0.16343011-0.81715053j,
+        0.-0.8333333j,          -0.16343011-0.81715053j,  0.-0.8333333j,
+        0.-0.8333333j,
+    ]
+
+    nx = 156
+    ny = 82
+
 
     # Non-unit complex vectors (automatically normalized to unit vectors internally)
-    branch_vectors = [2.5 + 0.0j, -3.0 - 3.0j]
+    branch_vectors = us
 
     plot_julia_set(
         rs=rs,
         ps=ps,
         branch_vectors=branch_vectors,
-        xlim=(-1.5, 1.5),
-        ylim=(-1.5, 1.5),
-        resolution=800,
+        xlim=(0, nx),
+        ylim=(0, ny),
+        resolution=2000,
         n_iters=100,
-        escape_radius_squared=16.0,
+        escape_radius_squared=4,
         show_labels=True,
         show_branch_rays=True,
         show_radii=True,
