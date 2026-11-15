@@ -4,6 +4,7 @@ import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image, ImageFilter
 
 # Optional: enable 64-bit precision (complex128) for deep zooms into the fractal boundary
 # jax.config.update("jax_enable_x64", True)
@@ -305,6 +306,78 @@ def plot_julia_set(
     ax.set_xlabel("Re(z)")
     ax.set_ylabel("Im(z)")
     plt.tight_layout()
+
+    steps_j = jnp.asarray(steps_np, dtype=jnp.float32)
+    inside_j = jnp.asarray(inside_np, dtype=bool)
+
+    norm_steps = jnp.log1p(steps_j) / (jnp.log1p(steps_j).max() + 1e-8)
+    gray = jnp.where(inside_j, 1.0, norm_steps * 0.85)[::-1]  # flip to top-down
+
+    # --- JAX Sharpened UTF-8 Block & Edge-Directed Renderer (paste before plt.show()) ---
+    steps_j = jnp.asarray(steps_np, dtype=jnp.float32)
+    inside_j = jnp.asarray(inside_np, dtype=bool)
+
+    norm_steps = jnp.log1p(steps_j) / (jnp.log1p(steps_j).max() + 1e-8)
+    gray = jnp.where(inside_j, 1.0, norm_steps * 0.85)[::-1]  # flip to top-down
+
+    # --- JAX Sharpened UTF-8 Block & Edge-Directed Renderer (paste before plt.show()) ---
+    steps_j = jnp.asarray(steps_np, dtype=jnp.float32)
+    inside_j = jnp.asarray(inside_np, dtype=bool)
+
+    s_shift = jnp.maximum(0.0, steps_j - steps_j.min())
+    norm_steps = jnp.log1p(s_shift) / (jnp.log1p(s_shift).max() + 1e-8)
+    gray = jnp.where(inside_j, 1.0, norm_steps * 0.85)[::-1]  # flip to top-down
+
+    # 1. 3x3 Gaussian unsharp mask (masked so empty background stays strictly 0)
+    p = jnp.pad(gray, 1, mode="edge")
+    blur = (
+        p[:-2, :-2] + 2 * p[:-2, 1:-1] + p[:-2, 2:]
+        + 2 * p[1:-1, :-2] + 4 * p[1:-1, 1:-1] + 2 * p[1:-1, 2:]
+        + p[2:, :-2] + 2 * p[2:, 1:-1] + p[2:, 2:]
+    ) / 16.0
+    sharp = jnp.where(gray > 0.0, jnp.clip(gray + 1.8 * (gray - blur), 0.0, 1.0), 0.0)
+
+    # 2. Downsample to ~1:2 terminal grid + sub-cell halves for crisp bulb edges
+    ascii_w = 120
+    aspect = (ylim[1] - ylim[0]) / (xlim[1] - xlim[0])
+    ascii_h = max(1, int(ascii_w * aspect * 0.5))
+    bh, bw = max(2, sharp.shape[0] // ascii_h), max(2, sharp.shape[1] // ascii_w)
+
+    cells = sharp[: ascii_h * bh, : ascii_w * bw].reshape(ascii_h, bh, ascii_w, bw)
+    has_col = cells.max(axis=(1, 3)) > 0.05  # raise slightly (e.g. 0.15) to clip faint outer glow to blank
+    lum = 0.65 * cells.mean(axis=(1, 3)) + 0.35 * cells.max(axis=(1, 3))
+
+    top, bot = cells[:, : bh // 2].mean(axis=(1, 3)), cells[:, bh // 2 :].mean(axis=(1, 3))
+    left, right = cells[:, :, :, : bw // 2].mean(axis=(1, 3)), cells[:, :, :, bw // 2 :].mean(axis=(1, 3))
+
+    # 3. Sobel edge angles (restricted to cells with signal so background stays blank)
+    lp = jnp.pad(lum, 1, mode="edge")
+    gx = (lp[:-2, 2:] + 2 * lp[1:-1, 2:] + lp[2:, 2:]) - (lp[:-2, :-2] + 2 * lp[1:-1, :-2] + lp[2:, :-2])
+    gy = (lp[2:, :-2] + 2 * lp[2:, 1:-1] + lp[2:, 2:]) - (lp[:-2, :-2] + lp[:-2, 1:-1] + lp[:-2, 2:])
+    mag = jnp.hypot(gx, gy)
+    ang = jnp.degrees(jnp.arctan2(gy, gx)) % 180.0
+
+    # Base tonal ramp: 0:' ' (no col), 1:'·', 2:'•', 3:'░', 4:'▒', 5:'▓', 6:'█'
+    idx = jnp.where(has_col, jnp.clip(1 + (lum * 5.99).astype(jnp.int32), 1, 6), 0)
+    edges = has_col & (mag > 0.35)
+
+    horiz = edges & (ang >= 67.5) & (ang < 112.5)
+    vert = edges & ((ang < 22.5) | (ang >= 157.5))
+    diag_up = edges & (ang >= 22.5) & (ang < 67.5)
+    diag_dn = edges & (ang >= 112.5) & (ang < 157.5)
+
+    idx = jnp.where(vert, 7, idx)      # '│'
+    idx = jnp.where(diag_up, 8, idx)   # '╱'
+    idx = jnp.where(horiz, 9, idx)     # '─'
+    idx = jnp.where(diag_dn, 10, idx)  # '╲'
+    idx = jnp.where(edges & (jnp.abs(gx) > 0.3) & (jnp.abs(gy) > 0.3) & (lum < 0.65), 11, idx)  # '╳'
+
+    idx = jnp.where(horiz & (jnp.abs(top - bot) > 0.35), jnp.where(top > bot, 12, 13), idx)    # '▀' / '▄'
+    idx = jnp.where(vert & (jnp.abs(left - right) > 0.35), jnp.where(left > right, 14, 15), idx)  # '▌' / '▐'
+
+    glyphs = np.array(list(" ·•░▒▓█│╱─╲╳▀▄▌▐"))
+    grid = glyphs[np.asarray(idx)]
+    print("\n".join("".join(row) for row in grid))
     plt.show()
 
 
@@ -319,7 +392,6 @@ if __name__ == "__main__":
     us = [-0.8312156 -0.05937254j, -0.8317104 -0.0519819j,  -0.7066652 -0.44166577j, 0.20211302-0.80845207j, -0.13699915-0.8219949j]
     nx = 120
     ny = 60"""
-
 
 
     ps = jnp.array([
@@ -361,7 +433,7 @@ if __name__ == "__main__":
         branch_vectors=branch_vectors,
         xlim=(0, nx),
         ylim=(0, ny),
-        resolution=2000,
+        resolution=800,
         n_iters=100,
         escape_radius_squared=4,
         show_labels=True,
