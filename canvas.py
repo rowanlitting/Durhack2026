@@ -1,22 +1,22 @@
 import math
 import random
 from dataclasses import dataclass
+from functools import lru_cache
 
 from rich.segment import Segment
 from rich.style import Style
-from textual.events import MouseDown, MouseMove, MouseUp
+from textual.events import MouseDown, MouseMove, MouseUp, Resize
 from textual.strip import Strip
-from textual.widget import Widget
 from textual.timer import Timer
-
-from functools import lru_cache
-from textual.events import Resize
+from textual.widget import Widget
 
 SHADES = " ·░▒▓█"  # index = density level
+
 
 @lru_cache(maxsize=None)
 def cell_style(color: str) -> Style:
     return Style(color=color)
+
 
 @dataclass
 class Drip:
@@ -25,6 +25,14 @@ class Drip:
     color: str
     remaining: int  # how many more rows it can travel
 
+
+class Point:
+    def __init__(self, count=1, prev=None):
+        self.count = count
+        self.prev = prev
+
+    def __repr__(self):
+        return f"Point(count={self.count}, prev={self.prev})"
 
 
 class Canvas(Widget):
@@ -37,7 +45,7 @@ class Canvas(Widget):
     falloff = 2.5
     drip_chance = 0.3
     max_drips = 40
-    fade_every: float | None = None   # None = paint never fades
+    fade_every: float | None = None  # None = paint never fades
     paused = False
 
     def __init__(self, **kwargs) -> None:
@@ -93,7 +101,7 @@ class Canvas(Widget):
             angle = random.uniform(0, 2 * math.pi)
             dist = self.radius * random.random() ** self.falloff
 
-            x = round(cx + math.cos(angle) * dist * 2)   # *2 for cell aspect ratio
+            x = round(cx + math.cos(angle) * dist * 2)  # *2 for cell aspect ratio
             y = round(cy + math.sin(angle) * dist)
 
             if 0 <= x < self.size.width and 0 <= y < self.size.height:
@@ -102,9 +110,12 @@ class Canvas(Widget):
                 self.pixels[(x, y)] = (color, new_level)
                 self._rows.pop(y, None)
 
-                if (new_level == len(SHADES) - 1 and level < new_level
-                        and len(self.drips) < self.max_drips
-                        and random.random() < self.drip_chance):
+                if (
+                    new_level == len(SHADES) - 1
+                    and level < new_level
+                    and len(self.drips) < self.max_drips
+                    and random.random() < self.drip_chance
+                ):
                     self.drips.append(Drip(x, y, color, random.randint(3, 12)))
 
     def update_drips(self) -> None:
@@ -155,7 +166,7 @@ class Hand:
     x: float = 0.0
     y: float = 0.0
     angle: float = 0.0
-    turn: float = 0.0          # current turn rate (radians per frame)
+    turn: float = 0.0  # current turn rate (radians per frame)
     speed: float = 0.15
     pen_down: bool = True
 
@@ -163,17 +174,17 @@ class Hand:
 class AutoSprayCanvas(Canvas):
     """Menu background: several slow hands, each spraying its own muted color."""
 
-    palette = ["#3F4A8A", "#7A4A7A", "#8A4A4A", "#4A7A7A"]   # desaturated
-    dots = 6              # lighter deposit so paint stays soft
+    palette = ["#3F4A8A", "#7A4A7A", "#8A4A4A", "#4A7A7A"]  # desaturated
+    dots = 6  # lighter deposit so paint stays soft
 
     # Fading: check often, but only a small fraction of cells step down each time
     fade_every = 0.4
     fade_chance = 0.08
 
     # Steering
-    max_turn = 0.06       # limit on how sharply a hand can curve
-    turn_jitter = 0.008   # how much the turn rate drifts each frame
-    turn_damping = 0.97   # pulls the turn rate back toward a straight line
+    max_turn = 0.06  # limit on how sharply a hand can curve
+    turn_jitter = 0.008  # how much the turn rate drifts each frame
+    turn_damping = 0.97  # pulls the turn rate back toward a straight line
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -234,7 +245,7 @@ class AutoSprayCanvas(Canvas):
             hand.x, hand.y = x, y
 
             if hand.pen_down:
-                if random.random() < 0.004:      # lifts the pen rarely
+                if random.random() < 0.004:  # lifts the pen rarely
                     hand.pen_down = False
             elif random.random() < 0.03:
                 hand.pen_down = True
@@ -259,7 +270,6 @@ class AutoSprayCanvas(Canvas):
         self.pixels = faded
         self.refresh()
 
-
     # ---------- Mouse drawing ----------
 
     def on_mouse_down(self, event: MouseDown) -> None:
@@ -271,7 +281,7 @@ class AutoSprayCanvas(Canvas):
 
     def on_mouse_move(self, event: MouseMove) -> None:
         self.mouse_pos = (event.x, event.y)
-        
+
     def on_mouse_up(self, event: MouseUp) -> None:
         if self.spray_timer:
             self.spray_timer.stop()
@@ -293,6 +303,7 @@ class AutoSprayCanvas(Canvas):
         self.last_pos = self.mouse_pos
         self.refresh()
 
+
 class PaintCanvas(Canvas):
     """Your original interactive version: spray with the mouse."""
 
@@ -301,9 +312,10 @@ class PaintCanvas(Canvas):
         self.spray_timer = None
         self.mouse_pos = (0, 0)
         self.last_pos = (0, 0)
-        self.points: list[tuple[int, int]] = []
+        self.points = {}
+        self.last_point = None
 
-        #to get points use points = self.query_one(PaintCanvas).points from anywhere with access to the screen
+        # to get points use points = self.query_one(PaintCanvas).points from anywhere with access to the screen
 
         self.sample_timer: Timer | None = None
 
@@ -329,11 +341,18 @@ class PaintCanvas(Canvas):
         self.release_mouse()
 
     def record_point(self) -> None:
-        self.points.append(self.mouse_pos)
+        pos = self.mouse_pos
+        if pos in self.points:
+            self.points[pos].count += 1
+        else:
+            point = Point(count=1, prev=self.last_point)
+            self.points[pos] = point
+            self.last_point = point
 
     def clear(self) -> None:
         super().clear()
         self.points.clear()
+        self.last_point = None
 
     def spray(self) -> None:
         x0, y0 = self.last_pos

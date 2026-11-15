@@ -361,7 +361,7 @@ if __name__ == "__main__":
         branch_vectors=branch_vectors,
         xlim=(0, nx),
         ylim=(0, ny),
-        resolution=2000,
+        resolution=700,
         n_iters=100,
         escape_radius_squared=4,
         show_labels=True,
