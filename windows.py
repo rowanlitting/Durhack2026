@@ -327,7 +327,7 @@ class FractalScreen(ModalScreen):
         ("up", "pan(0, -0.25)", "Up"),
         ("down", "pan(0, 0.25)", "Down"),
     ]
-    MAX_ZOOM = 64
+    MAX_ZOOM = 100_000
 
     DEFAULT_CSS = """
     FractalScreen {
@@ -445,5 +445,5 @@ class FractalScreen(ModalScreen):
         else:
             self.query_one("#fractal", FractalView).set_grid(grid)
         self.query_one("#window").border_subtitle = (
-            f" {self.zoom_level:.1f}x · click zoom in · right-click/scroll out · arrows pan · R reset · Esc close "
+            f" {self.zoom_level:,.0f}x · click zoom in · right-click/scroll out · arrows pan · R reset · Esc close "
         )
