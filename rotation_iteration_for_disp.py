@@ -4,6 +4,7 @@ import rotation_iterator as ri
 import jax
 import jax.numpy as jnp
 
+from functools import partial
 
 def points_for_disp(points, last_point, nx, ny, escape_radius_squared=5,
                     n_iters=300, y_scale=1.0, view=None):
@@ -40,7 +41,7 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared=5,
     py = np.arange(ny) + 0.5
     grid = px[None, :] + 1j * py[:, None]
 
-    inside, escape_steps = ri.evaluate_grid(
+    inside, escape_steps = evaluate_chunked(
         jnp.asarray(grid, dtype=jnp.complex64),
         jnp.asarray(rs, dtype=jnp.float32),
         jnp.asarray(1 / rs, dtype=jnp.float32),
@@ -51,6 +52,20 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared=5,
 
     steps = jnp.maximum(escape_steps, 1)
     return jnp.clip(100 * (1 - jnp.log(steps) / jnp.log(n_iters)), 0, 100)
+
+
+@partial(jax.jit, static_argnames=("chunk",))
+def evaluate_chunked(grid, rs, inv_rs, ps, us, er2, n_iters, chunk=32):
+    ny, nx = grid.shape
+    pad = (-ny) % chunk
+    # Pad with a far-away point that escapes immediately
+    g = jnp.pad(grid, ((0, pad), (0, 0)), constant_values=1e6 + 1e6j)
+    g = g.reshape(-1, chunk, nx)
+    inside, steps = jax.lax.map(
+        lambda blk: ri.evaluate_grid(blk, rs, inv_rs, ps, us, er2, n_iters), g
+    )
+    return inside.reshape(-1, nx)[:ny], steps.reshape(-1, nx)[:ny]
+
 
 if __name__ == "__main__":
     last_point = (6, 1)
