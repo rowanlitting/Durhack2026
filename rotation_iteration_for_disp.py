@@ -21,8 +21,11 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 5, n_ite
     diffs = jnp.array(diffs_lst, dtype=jnp.complex64)
     rs = 1.2*abs(diffs)
     us = diffs/rs
-    rs = jnp.minimum(rs, 25)
+    rs = jnp.minimum(rs, 10)
     inv_rs = 1/rs
+
+    with open("./log.txt", "a") as fl:
+        fl.write(f"ps = {ps}; rs = {rs}; us = {us}; nx = {nx}; ny = {ny}")
 
     # Run the JIT-compiled, vectorized escape-time evaluation
     inside, escape_steps = ri.evaluate_grid(

@@ -27,6 +27,8 @@ class DrawApp(App):
             #p2 = (10,30)
             #points =  {p0: Point(count=1, prev=None), p1: Point(count=1, prev=p0), p2: Point(count=1, prev=p1)}
             #last_point = p2
+            
+
             grid = points_for_disp(points, last_point, cols, rows, escape_radius_squared=1.5, n_iters=150)
             self.query_one(FractalView).set_grid(grid)
     
