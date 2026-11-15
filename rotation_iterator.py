@@ -108,11 +108,14 @@ def evaluate_point(
         z_next = r * u_next + p
 
         # Escape test on |u_next|^2 == |u_aligned_sq|^2 (avoids sqrt from jnp.abs)
-        mag_sq = (
+        scaled_mag_sq = (
             u_aligned_sq.real * u_aligned_sq.real
             + u_aligned_sq.imag * u_aligned_sq.imag
         )
-        still_inside = mag_sq <= escape_radius_squared
+
+        mag_sq = jnp.abs(z_init - z_next)**2
+
+        still_inside = jnp.logical_and(scaled_mag_sq <= escape_radius_squared, mag_sq <= 10*r**2)
 
         return (step + 1, z_next, still_inside)
 

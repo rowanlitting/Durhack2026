@@ -4,6 +4,7 @@ from canvas import Canvas, Point
 from fractal_view import FractalView
 import jax
 from textual.events import Key
+import jax.numpy as jnp
 
 class DrawApp(App):
     def compose(self):
@@ -20,13 +21,13 @@ class DrawApp(App):
 
             fractal = FractalView()
             await self.mount(fractal)
-            rows, cols = w, h*2
+            rows, cols = 2*h, w
             #p0 = (10,30)
             #p1 = (50, 20)
             #p2 = (10,30)
             #points =  {p0: Point(count=1, prev=None), p1: Point(count=1, prev=p0), p2: Point(count=1, prev=p1)}
             #last_point = p2
-            grid = points_for_disp(points, last_point, cols, rows, n_iters=100)
+            grid = points_for_disp(points, last_point, cols, rows, escape_radius_squared=1.5, n_iters=150)
             self.query_one(FractalView).set_grid(grid)
     
 

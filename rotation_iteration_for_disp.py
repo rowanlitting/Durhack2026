@@ -3,7 +3,7 @@ import rotation_iterator as ri
 import jax
 import jax.numpy as jnp
 
-def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 4, n_iters = 300):
+def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 5, n_iters = 300):
     x = jnp.linspace(0, nx, nx)
     y = jnp.linspace(0, ny, ny)
     grid = x[None, :] + 1j * y[:, None]
@@ -19,16 +19,16 @@ def points_for_disp(points, last_point, nx, ny, escape_radius_squared = 4, n_ite
         last_point = points[last_point].prev
     ps = jnp.array(ps_lst, dtype=jnp.complex64)
     diffs = jnp.array(diffs_lst, dtype=jnp.complex64)
-    rs = abs(diffs)
+    rs = 1.2*abs(diffs)
     us = diffs/rs
-    rs = jnp.minimum(rs, 10)
+    rs = jnp.minimum(rs, 25)
     inv_rs = 1/rs
 
     # Run the JIT-compiled, vectorized escape-time evaluation
     inside, escape_steps = ri.evaluate_grid(
         grid, rs, inv_rs, ps, us, escape_radius_squared, n_iters
     )
-    return inside#escape_steps
+    return 100*(1-jnp.log(escape_steps)/jnp.log(n_iters)) #escape_steps
 
 if __name__ == "__main__":
     last_point = (6, 1)
